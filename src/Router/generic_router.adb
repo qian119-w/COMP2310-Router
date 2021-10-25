@@ -3,37 +3,12 @@
 --
 
 with Exceptions; use Exceptions;
-with Ada.Text_IO; use Ada.Text_IO;
+-- with Ada.Text_IO; use Ada.Text_IO;
 package body Generic_Router is
 
    task body Router_Task is
 
       Connected_Routers : Ids_To_Links;
-      protected Shutdown_Flag is
-         procedure Sd;
-         function Read return Boolean;
-         entry Wait;
-         entry Release;
-      private
-         Flag : Boolean := False;
-         Value : Boolean := False;
-      end Shutdown_Flag;
-
-      protected body Shutdown_Flag is
-         procedure Sd is
-         begin
-            Flag := True;
-         end Sd;
-         function Read return Boolean is (Flag);
-         entry Wait when Value is
-         begin
-            Value := False;
-         end Wait;
-         entry Release when not Value is
-         begin
-            Value := True;
-         end Release;
-      end Shutdown_Flag;
 
    begin
       accept Configure (Links : Ids_To_Links) do
@@ -43,49 +18,98 @@ package body Generic_Router is
       declare
          Port_List : constant Connected_Router_Ports := To_Router_Ports (Task_Id, Connected_Routers);
          pragma Unreferenced (Port_List);
+         -- store the neighbour information of all routers
+         Local_Linkages_Storage : array (Router_Range) of Linkage;
+         task type Worker is
+            entry Worker_Comm (Msg : in Inter_Msg);
+         end Worker;
+         Limit : constant Positive := 5;
+         Workers : array (1 .. Limit) of Worker;
 
-         task T;
-         task body T is
+         protected Count is
+            procedure Inc;
+            procedure Dec;
+            entry Hold (Msg : Inter_Msg);
+         private
+            Num : Natural := 0;
+         end Count;
+
+         protected body Count is
+            procedure Inc is
+            begin
+               Num := Num + 1;
+            end Inc;
+
+            procedure Dec is
+            begin
+               Num := Num - 1;
+            end Dec;
+
+            entry Hold (Msg : Inter_Msg) when Num < Limit is
+            begin
+               Outer : loop
+                  for W of Workers loop
+                     select
+                        W.Worker_Comm (Msg);
+                        exit Outer;
+                     else
+                        null;
+                     end select;
+                  end loop;
+               end loop Outer;
+            end Hold;
+         end Count;
+
+         task body Worker is
          begin
             loop
-               Shutdown_Flag.Release;
-               Shutdown_Flag.Wait;
-               exit when Shutdown_Flag.Read;
+               select
+                  accept Worker_Comm (Msg : in Inter_Msg) do
+                     null;
+                  end Worker_Comm;
+               or
+                  terminate;
+               end select;
             end loop;
-         end T;
+         end Worker;
 
       begin
-         loop
-            select
 
-               accept Send_Message (Message : in Messages_Client) do
-                  declare
-                     Swallow_Message : Messages_Client := Message; pragma Unreferenced (Swallow_Message);
-                  begin
+         declare
+         begin
+            loop
+               select
+
+                  accept Comm (Msg : in Inter_Msg) do
                      null;
-                  end;
-               end Send_Message;
+                  end Comm;
+               or
+                  accept Send_Message (Message : in Messages_Client) do
+                     declare
+                        Swallow_Message : Messages_Client := Message; pragma Unreferenced (Swallow_Message);
+                     begin
+                        null;
+                     end;
+                  end Send_Message;
 
-            or
-               accept Receive_Message (Message : out Messages_Mailbox) do
-                  declare
-                     Made_Up_Mailbox_Message : constant Messages_Mailbox :=
-                       (Sender      => Task_Id,
-                        The_Message => Message_Strings.To_Bounded_String ("I just see things"),
-                        Hop_Counter => 0);
-                  begin
-                     Message := Made_Up_Mailbox_Message;
-                  end;
-               end Receive_Message;
+               or
+                  accept Receive_Message (Message : out Messages_Mailbox) do
+                     declare
+                        Made_Up_Mailbox_Message : constant Messages_Mailbox :=
+                          (Sender      => Task_Id,
+                           The_Message => Message_Strings.To_Bounded_String ("I just see things"),
+                           Hop_Counter => 0);
+                     begin
+                        Message := Made_Up_Mailbox_Message;
+                     end;
+                  end Receive_Message;
 
-            or
-               accept Shutdown  do
-                  Shutdown_Flag.Sd;
-                  Put_Line ("here");
-               end Shutdown;
-               exit;
-            end select;
-         end loop;
+               or
+                  accept Shutdown;
+                  exit;
+               end select;
+            end loop;
+         end;
       end;
 
    exception

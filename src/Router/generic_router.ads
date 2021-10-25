@@ -33,11 +33,7 @@ package Generic_Router is
 
       entry Shutdown;
 
-      -- Leave anything above this line as it will be used by the testing framework
-      -- to communicate with your router.
-
-      --  Add one or multiple further entries for inter-router communications here.
-
+      entry Comm (Msg : Inter_Msg);
    end Router_Task;
 
 end Generic_Router;

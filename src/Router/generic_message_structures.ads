@@ -4,6 +4,7 @@
 
 with Ada.Strings.Bounded;           use Ada.Strings.Bounded;
 with Generic_Routers_Configuration;
+with Ada.Containers.Vectors;
 
 generic
    with package Routers_Configuration is new Generic_Routers_Configuration (<>);
@@ -28,9 +29,22 @@ package Generic_Message_Structures is
       Hop_Counter : Natural          := 0;
    end record;
 
-   -- Leave anything above this line as it will be used by the testing framework
-   -- to communicate with your router.
+   package Vector_Pkg is new Ada.Containers.Vectors (Index_Type   => Positive,
+                                                     Element_Type => Router_Range);
 
-   --  Add one or multiple more messages formats here ..
+   type Inter_Msg is record
+      Sender : Router_Range;
+      Neighbours : Vector_Pkg.Vector;
+      Msg_Seq_No : Natural := 0;
+   end record;
+
+   protected type Linkage is
+      procedure Update (Msg : Inter_Msg);
+      function Read_Seq_No return Natural;
+      function Read_Neighbours return Vector_Pkg.Vector;
+   private
+      Links : Vector_Pkg.Vector;
+      Local_Seq_No : Natural := 0;
+   end Linkage;
 
 end Generic_Message_Structures;
