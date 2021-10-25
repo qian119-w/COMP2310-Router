@@ -1,19 +1,23 @@
 package body Generic_Message_Structures is
 
    protected body Linkages is
-      procedure Update (Msg : Inter_Msg; Multicast : out Boolean) is
+      procedure Update (Msg : Inter_Msg; Multicast : out Boolean; Compute : out Boolean) is
          B : Boolean := False;
+         C : Boolean := True;
       begin
-         if Msg.Msg_Seq_No > Local_Seq_No then
-            Local_Seq_No := Msg.Msg_Seq_No;
-            Links := Msg.Neighbours;
+         if Msg.Msg_Seq_No > L (Msg.Sender).Local_Seq_No then
+            L (Msg.Sender).Local_Seq_No := Msg.Msg_Seq_No;
+            L (Msg.Sender).Links := Msg.Neighbours;
             B := True;
          end if;
+         for Idx in Router_Range'Range loop
+            if L (Idx).Local_Seq_No = 0 then
+               C := False;
+            end if;
+         end loop;
          Multicast := B;
+         Compute := C;
       end Update;
-
-      function Read_Seq_No return Natural is (Local_Seq_No);
-      function Read_Neighbours return Vector_Pkg.Vector is (Links);
    end Linkages;
 
    protected body Flag is

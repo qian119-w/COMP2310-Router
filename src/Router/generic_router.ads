@@ -28,7 +28,7 @@ package Generic_Router is
 
       entry Configure (Links : Ids_To_Links);
 
-      entry Send_Message    (Message :     Messages_Client);
+      entry Send_Message    (Msg :     Messages_Client);
       entry Receive_Message (Message : out Messages_Mailbox);
 
       entry Shutdown;

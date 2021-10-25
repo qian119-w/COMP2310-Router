@@ -14,6 +14,8 @@ package body Generic_Router is
       Inter_Storage : Protected_Vector_Pkg.Protected_V;
       package Protected_Vector_Pkg_2 is new Protected_Vectors (Element => Maybe_Client_Msg);
       Repository : Protected_Vector_Pkg_2.Protected_V;
+      package Protected_Vector_Pkg_3 is new Protected_Vectors (Element => Client_Msg);
+      Storage : Protected_Vector_Pkg_3.Protected_V;
 
    begin
       accept Configure (Links : Ids_To_Links) do
@@ -23,7 +25,7 @@ package body Generic_Router is
       declare
          Port_List : constant Connected_Router_Ports := To_Router_Ports (Task_Id, Connected_Routers);
          -- store the neighbour information of all routers
-         Local_Linkages : array (Router_Range) of Linkages;
+         Local_Linkages : Linkages;
          Start_Forward : Flag;
          task type Worker is
             entry Worker_Comm (Msg : in Inter_Msg);
@@ -40,19 +42,7 @@ package body Generic_Router is
             loop
                select
                   accept Start;
-                  declare
-                     Compute : Boolean := True;
-                  begin
-                     for Idx in Router_Range'Range loop
-                        if Local_Linkages (Idx).Read_Seq_No = 0 then
-                           Compute := False;
-                           exit;
-                        end if;
-                     end loop;
-                     if Compute then
 
-                     end if;
-                  end;
                or
                   terminate;
                end select;
@@ -121,13 +111,18 @@ package body Generic_Router is
                   end Worker_Comm;
                   declare
                      Has_Update : Boolean;
+                     Recompute : Boolean;
                   begin
-                     Local_Linkages (M.Sender).Update (Msg       => M,
-                                                       Multicast => Has_Update);
+                     Local_Linkages.Update (Msg       => M,
+                                            Multicast => Has_Update,
+                                            Compute   => Recompute);
                      if Has_Update then
+                        Start_Forward.Change_Flag (B => False);
                         for Port of Port_List loop
                            Port.Link.all.Comm (M);
                         end loop;
+                     end if;
+                     if Recompute then
                         Compute_Graph.Start;
                      end if;
                   end;
@@ -136,7 +131,7 @@ package body Generic_Router is
                      Client_M := Msg;
                   end Forward;
                   if not Start_Forward.Read_Flag then
-                     Repository.Enqueue (Client_M);
+                     Repository.Enqueue (Client_Msg_Maybe.Valid_Value (E => Client_M));
                   end if;
                or
                   terminate;
@@ -167,7 +162,7 @@ package body Generic_Router is
                   end;
                end Comm;
             or
-               accept Send_Message (Message : in Messages_Client) do
+               accept Send_Message (Msg : in Messages_Client) do
                   declare
                      M_Processed : Client_Msg;
                   begin

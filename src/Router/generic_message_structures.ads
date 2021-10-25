@@ -60,12 +60,9 @@ package Generic_Message_Structures is
    type Linkage_Array is array (Router_Range) of Linkage;
 
    protected type Linkages is
-      procedure Update (Msg : Inter_Msg; Multicast : out Boolean);
-      function Read_Seq_No return Natural;
-      function Read_Neighbours return Vector_Pkg.Vector;
+      procedure Update (Msg : Inter_Msg; Multicast : out Boolean; Compute : out Boolean);
    private
-      Links : Vector_Pkg.Vector;
-      Local_Seq_No : Natural := 0;
+      L : Linkage_Array;
    end Linkages;
 
    protected type Flag is
