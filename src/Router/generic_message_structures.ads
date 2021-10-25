@@ -5,6 +5,7 @@
 with Ada.Strings.Bounded;           use Ada.Strings.Bounded;
 with Generic_Routers_Configuration;
 with Ada.Containers.Vectors;
+with Maybe_Type;
 
 generic
    with package Routers_Configuration is new Generic_Routers_Configuration (<>);
@@ -38,13 +39,40 @@ package Generic_Message_Structures is
       Msg_Seq_No : Natural := 0;
    end record;
 
-   protected type Linkage is
-      procedure Update (Msg : Inter_Msg);
+   type Client_Msg is record
+      Sender      : Router_Range     := Router_Range'Invalid_Value;
+      Destination : Router_Range;
+      The_Message : The_Core_Message;
+      Hop_Counter : Natural          := 0;
+   end record;
+
+   package Inter_Msg_Maybe is new Maybe_Type (Element => Inter_Msg);
+   subtype Maybe_Inter_Msg is Inter_Msg_Maybe.Maybe;
+
+   package Client_Msg_Maybe is new Maybe_Type (Element => Client_Msg);
+   subtype Maybe_Client_Msg is Client_Msg_Maybe.Maybe;
+
+   type Linkage is record
+      Links : Vector_Pkg.Vector;
+      Local_Seq_No : Natural := 0;
+   end record;
+
+   type Linkage_Array is array (Router_Range) of Linkage;
+
+   protected type Linkages is
+      procedure Update (Msg : Inter_Msg; Multicast : out Boolean);
       function Read_Seq_No return Natural;
       function Read_Neighbours return Vector_Pkg.Vector;
    private
       Links : Vector_Pkg.Vector;
       Local_Seq_No : Natural := 0;
-   end Linkage;
+   end Linkages;
+
+   protected type Flag is
+      procedure Change_Flag (B : Boolean);
+      function Read_Flag return Boolean;
+   private
+      F : Boolean := False;
+   end Flag;
 
 end Generic_Message_Structures;
