@@ -36,7 +36,7 @@ package Generic_Message_Structures is
    type Inter_Msg is record
       Sender : Router_Range;
       Neighbours : Vector_Pkg.Vector;
-      Msg_Seq_No : Natural := 0;
+   --   Msg_Seq_No : Natural := 0;
    end record;
 
    type Client_Msg is record
@@ -65,7 +65,6 @@ package Generic_Message_Structures is
       function Read_Link (Idx : Router_Range) return Linkage;
    private
       L : Linkage_Array;
-      Par_Table : Par_Array;
    end Linkages;
 
    protected type Flag is

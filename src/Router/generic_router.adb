@@ -25,7 +25,10 @@ package body Generic_Router is
       declare
          Port_List : constant Connected_Router_Ports := To_Router_Ports (Task_Id, Connected_Routers);
          -- store the neighbour information of all routers
-         Local_Linkages : Linkages;
+         --     Local_Linkages : Linkages;
+         Local_Linkages : array (Router_Range) of Linkage;
+         -- connectivity table --
+         Par_Table : Par_Array;
          Start_Forward : Flag;
          task type Worker is
             entry Worker_Comm (Msg : in Inter_Msg);
@@ -44,42 +47,11 @@ package body Generic_Router is
                select
                   accept Start;
                   declare
-                     N : Vector_Pkg.Vector;
-                     Current : Linkage := Local_Linkages.Read_Link (Idx => Task_Id);
-                     Has_Changed : Boolean := False;
+                     M : Inter_Msg;
                   begin
-                     for Port of Port_List loop
-                        N.Append (New_Item => Port.Id);
-                        begin
-                           Port.Link.all.Responsive;
-                        exception
-                           when Tasking_Error => N.Delete_Last;
-                        end;
-                     end loop;
-                     if Current.Links.Length /= N.Length then
-                        declare
-                           M : Inter_Msg;
-                           Has_Update : Boolean;
-                           C : Boolean;
-                        begin
-                           M.Sender := Task_Id;
-                           M.Neighbours := N;
-                           M.Msg_Seq_No := Current.Local_Seq_No + 1;
-                           Local_Linkages.Update (Msg       => M,
-                                                  Multicast => Has_Update,
-                                                  Compute   => C);
-                           for Port of Port_List loop
-                              begin
-                                 Port.Link.all.Comm (M);
-                              exception
-                                 when Tasking_Error => null;
-                              end;
-                           end loop;
-
-                        end;
-                     end if;
+                     M.Sender := Task_Id;
+                     Inter_Storage.Enqueue (Item => Inter_Msg_Maybe.Valid_Value (E => M));
                   end;
-
                or
                   terminate;
                end select;
@@ -97,32 +69,75 @@ package body Generic_Router is
                   if not M.Valid then
                      exit Fetching;
                   end if;
+                  Start_Forward.Change_Flag (B => False);
                   declare
                      Msg : Inter_Msg := M.Value;
                   begin
+                     -- msg comes from myself -- check current linkage changes
+                     if Msg.Sender = Task_Id then
+                        declare
+                           N : Vector_Pkg.Vector;
+                           Current : Linkage := Local_Linkages.Read_Link (Idx => Task_Id);
+                           Dropped : Vector_Pkg.Vector;
+                        begin
+                           for Port of Port_List loop
+                              N.Append (New_Item => Port.Id);
+                              begin
+                                 Port.Link.all.Responsive;
+                              exception
+                                 when Tasking_Error =>
+                                    Dropped.Append (New_Item => Port.Id);
+                              end;
+                           end loop;
+                           if Current.Links.Length /= N.Length then
+                              declare
+                                 Update_M : Inter_Msg;
+                                 Has_Update : Boolean;
+                                 C : Boolean;
+                              begin
+                                 Update_M.Sender := Task_Id;
+                                 Update_M.Neighbours := N;
+                                 Update_M.Msg_Seq_No := Current.Local_Seq_No + 1;
 
-                  declare
-                     Has_Update : Boolean;
-                     Recompute : Boolean;
-                  begin -- compute graph & update put into a single mutual exclusive region
-                     Local_Linkages.Update (Msg       => M,
-                                            Multicast => Has_Update,
-                                            Compute   => Recompute);
-                     if Has_Update then
-                        Start_Forward.Change_Flag (B => False);
+                                 Local_Linkages.Update (Msg       => Update_M,
+                                                        Multicast => Has_Update,
+                                                        Compute   => C);
+                                 if Has_Update then
+                                    Outer : loop
+                                       for W of Workers loop
+                                          select
+                                             W.Worker_Comm (Update_M);
+                                             exit Outer;
+                                          else
+                                             null;
+                                          end select;
+                                       end loop;
+                                    end loop Outer;
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     else -- msg comes from others -- check sequence number
+                        declare
+                           Has_Update : Boolean;
+                           Recompute : Boolean;
+                        begin
+                           Local_Linkages.Update (Msg       => M,
+                                                  Multicast => Has_Update,
+                                                  Compute   => Recompute);
+                        end;
+
+                        Outer : loop
+                           for W of Workers loop
+                              select
+                                 W.Worker_Comm (M.Value);
+                                 exit Outer;
+                              else
+                                 null;
+                              end select;
+                           end loop;
+                        end loop Outer;
                      end if;
-                  end;
-
-                     Outer : loop
-                        for W of Workers loop
-                           select
-                              W.Worker_Comm (M.Value);
-                              exit Outer;
-                           else
-                              null;
-                           end select;
-                        end loop;
-                     end loop Outer;
                   end;
                end;
             end loop Fetching;
