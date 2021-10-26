@@ -36,7 +36,6 @@ package Generic_Message_Structures is
    type Inter_Msg is record
       Sender : Router_Range;
       Neighbours : Vector_Pkg.Vector;
-   --   Msg_Seq_No : Natural := 0;
    end record;
 
    type Client_Msg is record
@@ -60,16 +59,10 @@ package Generic_Message_Structures is
    type Linkage_Array is array (Router_Range) of Linkage;
    type Par_Array is array (Router_Range) of Router_Range;
 
-   protected type Linkages is
-      procedure Update (Msg : Inter_Msg; Multicast : out Boolean; Compute : out Boolean);
-      function Read_Link (Idx : Router_Range) return Linkage;
-   private
-      L : Linkage_Array;
-   end Linkages;
-
    protected type Flag is
       procedure Change_Flag (B : Boolean);
       function Read_Flag return Boolean;
+      entry Wait;
    private
       F : Boolean := False;
    end Flag;

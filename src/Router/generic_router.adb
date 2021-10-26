@@ -4,7 +4,7 @@
 
 with Exceptions; use Exceptions;
 with Protected_Vectors;
--- with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Text_IO; use Ada.Text_IO;
 package body Generic_Router is
 
    task body Router_Task is
@@ -25,8 +25,7 @@ package body Generic_Router is
       declare
          Port_List : constant Connected_Router_Ports := To_Router_Ports (Task_Id, Connected_Routers);
          -- store the neighbour information of all routers
-         --     Local_Linkages : Linkages;
-         Local_Linkages : array (Router_Range) of Linkage;
+         Local_Linkages : Linkage_Array;
          -- connectivity table --
          Par_Table : Par_Array;
          Start_Forward : Flag;
@@ -34,8 +33,63 @@ package body Generic_Router is
             entry Worker_Comm (Msg : in Inter_Msg);
             entry Worker_Forward (Msg : in Client_Msg);
          end Worker;
-         Limit : constant Positive := 5;
+         Limit : constant Positive := 3;
          Workers : array (1 .. Limit) of Worker;
+
+         procedure Send (Msg : Inter_Msg) is
+         begin
+            Outer : loop
+               for W of Workers loop
+                  select
+                     W.Worker_Comm (Msg);
+                     exit Outer;
+                  else
+                     null;
+                  end select;
+               end loop;
+            end loop Outer;
+         end Send;
+
+         procedure Compute_Graph (Update : Boolean) is
+            All_Received : Boolean := True;
+         begin
+            for Idx in Router_Range'Range loop
+               if Local_Linkages (Idx).Local_Seq_No < 1 then
+                  All_Received := False;
+               end if;
+            end loop;
+            if All_Received then
+               if Update then
+                  Put_Line (Router_Range'Image (Task_Id));
+                  declare
+                     Visited : Vector_Pkg.Vector;
+                     Searched : array (Router_Range) of Boolean := (others => False);
+                  begin
+                     Visited.Append (New_Item => Task_Id);
+                     Par_Table (Task_Id) := Task_Id;
+                     loop
+                        exit when Natural (Visited.Length) = Natural (Router_Range'Last);
+                        declare
+                           Current_Last_Idx : constant Positive := Visited.Last_Index;
+                        begin
+                           for Idx in 1 .. Current_Last_Idx loop
+                              if not Searched (Visited.Element (Index => Idx)) then
+                                 for N of Local_Linkages (Visited.Element (Index => Idx)).Links loop
+                                    if not Visited.Contains (Item => N) then
+                                       Visited.Append (New_Item => N);
+                                       Par_Table (N) := Visited.Element (Index => Idx);
+                                    end if;
+                                 end loop;
+                                 Searched (Visited.Element (Index => Idx)) := True;
+                              end if;
+                           end loop;
+                        end;
+                     end loop;
+                  end;
+               end if;
+               Start_Forward.Change_Flag (B => True);
+            end if;
+         end Compute_Graph;
 
          task Local_Link is
             entry Start;
@@ -71,14 +125,15 @@ package body Generic_Router is
                   end if;
                   Start_Forward.Change_Flag (B => False);
                   declare
-                     Msg : Inter_Msg := M.Value;
+                     Msg : constant Inter_Msg := M.Value;
                   begin
                      -- msg comes from myself -- check current linkage changes
                      if Msg.Sender = Task_Id then
                         declare
-                           N : Vector_Pkg.Vector;
-                           Current : Linkage := Local_Linkages.Read_Link (Idx => Task_Id);
+                           N : Vector_Pkg.Vector; -- neighbours
+                           Current : constant Linkage := Local_Linkages (Task_Id);
                            Dropped : Vector_Pkg.Vector;
+                           Recompute : Boolean := False;
                         begin
                            for Port of Port_List loop
                               N.Append (New_Item => Port.Id);
@@ -89,54 +144,54 @@ package body Generic_Router is
                                     Dropped.Append (New_Item => Port.Id);
                               end;
                            end loop;
-                           if Current.Links.Length /= N.Length then
+                           if Natural (Current.Links.Length) /= Natural (N.Length) then
+                              Recompute := True;
+                              Local_Linkages (Task_Id).Links := N;
+                              Local_Linkages (Task_Id).Local_Seq_No := Local_Linkages (Task_Id).Local_Seq_No + 1;
                               declare
                                  Update_M : Inter_Msg;
-                                 Has_Update : Boolean;
-                                 C : Boolean;
                               begin
                                  Update_M.Sender := Task_Id;
                                  Update_M.Neighbours := N;
-                                 Update_M.Msg_Seq_No := Current.Local_Seq_No + 1;
-
-                                 Local_Linkages.Update (Msg       => Update_M,
-                                                        Multicast => Has_Update,
-                                                        Compute   => C);
-                                 if Has_Update then
-                                    Outer : loop
-                                       for W of Workers loop
-                                          select
-                                             W.Worker_Comm (Update_M);
-                                             exit Outer;
-                                          else
-                                             null;
-                                          end select;
-                                       end loop;
-                                    end loop Outer;
-                                 end if;
+                                 Send (Msg => Update_M);
                               end;
                            end if;
-                        end;
-                     else -- msg comes from others -- check sequence number
-                        declare
-                           Has_Update : Boolean;
-                           Recompute : Boolean;
-                        begin
-                           Local_Linkages.Update (Msg       => M,
-                                                  Multicast => Has_Update,
-                                                  Compute   => Recompute);
-                        end;
-
-                        Outer : loop
-                           for W of Workers loop
-                              select
-                                 W.Worker_Comm (M.Value);
-                                 exit Outer;
-                              else
-                                 null;
-                              end select;
+                           for Idx in Dropped.First_Index .. Dropped.Last_Index loop
+                              declare
+                                 N_D : Vector_Pkg.Vector; -- neighbours of a dropped router is nil
+                                 Current_D : constant Linkage := Local_Linkages (Dropped.Element (Index => Idx));
+                              begin
+                                 if Natural (Current_D.Links.Length) /= Natural (N_D.Length) then
+                                    Recompute := True;
+                                    Local_Linkages (Dropped.Element (Index => Idx)).Links := N_D;
+                                    Local_Linkages (Dropped.Element (Index => Idx)).Local_Seq_No
+                                      := Local_Linkages (Dropped.Element (Index => Idx)).Local_Seq_No + 1;
+                                    declare
+                                       Update_M : Inter_Msg;
+                                    begin
+                                       Update_M.Sender := Dropped.Element (Index => Idx);
+                                       Update_M.Neighbours := N_D;
+                                       Send (Msg => Update_M);
+                                    end;
+                                 end if;
+                              end;
                            end loop;
-                        end loop Outer;
+                           Compute_Graph (Update => Recompute);
+                        end;
+                     else -- msg comes from others -- check updates
+                        declare
+                           Current : constant Linkage := Local_Linkages (Msg.Sender);
+                           Recompute : Boolean := False;
+                        begin
+                           if Natural (Current.Links.Length) /= Natural (Msg.Neighbours.Length) then
+                              Recompute := True;
+                              Local_Linkages (Msg.Sender).Links := Msg.Neighbours;
+                              Local_Linkages (Msg.Sender).Local_Seq_No :=
+                                Local_Linkages (Msg.Sender).Local_Seq_No + 1;
+                              Send (Msg => Msg); -- pass this message to the next nodes
+                           end if;
+                           Compute_Graph (Update => Recompute);
+                        end;
                      end if;
                   end;
                end;
@@ -154,6 +209,7 @@ package body Generic_Router is
                   if not M.Valid then
                      exit F;
                   end if;
+                  Start_Forward.Wait;
                   Outer : loop
                      for W of Workers loop
                         select
@@ -192,6 +248,28 @@ package body Generic_Router is
                   end Worker_Forward;
                   if not Start_Forward.Read_Flag then
                      Repository.Enqueue (Client_Msg_Maybe.Valid_Value (E => Client_M));
+                  else
+                     declare
+                        Idx : Router_Range := Client_M.Destination;
+                     begin
+                        while Par_Table (Idx) /= Task_Id loop
+                           Idx := Par_Table (Idx);
+                        end loop;
+                        for Port of Port_List loop
+                           if Port.Id = Idx then
+                              begin
+                                 Client_M.Hop_Counter := Client_M.Hop_Counter + 1;
+                                 Port.Link.all.Forward (Client_M);
+                              exception
+                                 when Tasking_Error =>
+                                    Client_M.Hop_Counter := Client_M.Hop_Counter - 1;
+                                    Repository.Enqueue (Client_Msg_Maybe.Valid_Value (E => Client_M));
+                                    Local_Link.Start;
+                              end;
+                              exit;
+                           end if;
+                        end loop;
+                     end;
                   end if;
                or
                   terminate;
@@ -200,7 +278,7 @@ package body Generic_Router is
          end Worker;
 
       begin
-
+         Local_Link.Start;
          loop
             select
                accept Responsive;
