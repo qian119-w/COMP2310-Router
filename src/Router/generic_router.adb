@@ -26,6 +26,7 @@ package body Generic_Router is
          Port_List : constant Connected_Router_Ports := To_Router_Ports (Task_Id, Connected_Routers);
          -- store the neighbour information of all routers
          Local_Linkages : Linkage_Array;
+         Visited : Vector_Pkg.Vector;
          -- connectivity table --
          Par_Table : Par_Array;
          Start_Forward : Flag;
@@ -50,6 +51,34 @@ package body Generic_Router is
             end loop Outer;
          end Send;
 
+         procedure Change_Affected_Nodes (Idx : Router_Range) is
+         begin
+            for R in Router_Range'Range loop
+               declare
+                  Del : Boolean := False;
+                  I : Router_Range := R;
+               begin
+                  while Par_Table (I) /= Task_Id loop
+                     if Par_Table (I) = Idx then
+                        Del := True;
+                        exit;
+                     else
+                        I := Par_Table (I);
+                     end if;
+                  end loop;
+                  if Del then
+                     declare
+                        Ind : constant Vector_Pkg.Extended_Index := Visited.Find_Index (Item  => R);
+                     begin
+                        if Ind /= Vector_Pkg.No_Index then
+                           Visited.Delete (Index => Ind);
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+         end Change_Affected_Nodes;
+
          procedure Compute_Graph (Update : Boolean) is
             All_Received : Boolean := True;
          begin
@@ -62,11 +91,12 @@ package body Generic_Router is
                if Update then
                   Put_Line (Router_Range'Image (Task_Id));
                   declare
-                     Visited : Vector_Pkg.Vector;
                      Searched : array (Router_Range) of Boolean := (others => False);
                   begin
-                     Visited.Append (New_Item => Task_Id);
-                     Par_Table (Task_Id) := Task_Id;
+                     if not Visited.Contains (Item => Task_Id) then
+                        Visited.Append (New_Item => Task_Id);
+                        Par_Table (Task_Id) := Task_Id;
+                     end if;
                      loop
                         exit when Natural (Visited.Length) = Natural (Router_Range'Last);
                         declare
@@ -163,6 +193,7 @@ package body Generic_Router is
                               begin
                                  if Natural (Current_D.Links.Length) /= Natural (N_D.Length) then
                                     Recompute := True;
+                                    Change_Affected_Nodes (Idx => Dropped.Element (Index => Idx));
                                     Local_Linkages (Dropped.Element (Index => Idx)).Links := N_D;
                                     Local_Linkages (Dropped.Element (Index => Idx)).Local_Seq_No
                                       := Local_Linkages (Dropped.Element (Index => Idx)).Local_Seq_No + 1;
@@ -184,6 +215,9 @@ package body Generic_Router is
                            Recompute : Boolean := False;
                         begin
                            if Natural (Current.Links.Length) /= Natural (Msg.Neighbours.Length) then
+                              if Natural (Msg.Neighbours.Length) = 0 then
+                                 Change_Affected_Nodes (Idx => Msg.Sender);
+                              end if;
                               Recompute := True;
                               Local_Linkages (Msg.Sender).Links := Msg.Neighbours;
                               Local_Linkages (Msg.Sender).Local_Seq_No :=
