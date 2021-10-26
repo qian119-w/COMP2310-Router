@@ -29,25 +29,62 @@ package body Generic_Router is
          Start_Forward : Flag;
          task type Worker is
             entry Worker_Comm (Msg : in Inter_Msg);
-            entry Forward (Msg : in Client_Msg);
+            entry Worker_Forward (Msg : in Client_Msg);
          end Worker;
          Limit : constant Positive := 5;
          Workers : array (1 .. Limit) of Worker;
 
-         task Compute_Graph is
+         task Local_Link is
             entry Start;
-         end Compute_Graph;
-         task body Compute_Graph is
+         end Local_Link;
+
+         task body Local_Link is
          begin
             loop
                select
                   accept Start;
+                  declare
+                     N : Vector_Pkg.Vector;
+                     Current : Linkage := Local_Linkages.Read_Link (Idx => Task_Id);
+                     Has_Changed : Boolean := False;
+                  begin
+                     for Port of Port_List loop
+                        N.Append (New_Item => Port.Id);
+                        begin
+                           Port.Link.all.Responsive;
+                        exception
+                           when Tasking_Error => N.Delete_Last;
+                        end;
+                     end loop;
+                     if Current.Links.Length /= N.Length then
+                        declare
+                           M : Inter_Msg;
+                           Has_Update : Boolean;
+                           C : Boolean;
+                        begin
+                           M.Sender := Task_Id;
+                           M.Neighbours := N;
+                           M.Msg_Seq_No := Current.Local_Seq_No + 1;
+                           Local_Linkages.Update (Msg       => M,
+                                                  Multicast => Has_Update,
+                                                  Compute   => C);
+                           for Port of Port_List loop
+                              begin
+                                 Port.Link.all.Comm (M);
+                              exception
+                                 when Tasking_Error => null;
+                              end;
+                           end loop;
+
+                        end;
+                     end if;
+                  end;
 
                or
                   terminate;
                end select;
             end loop;
-         end Compute_Graph;
+         end Local_Link;
 
          task Fetcher;
          task body Fetcher is
@@ -60,16 +97,33 @@ package body Generic_Router is
                   if not M.Valid then
                      exit Fetching;
                   end if;
-                  Outer : loop
-                     for W of Workers loop
-                        select
-                           W.Worker_Comm (M.Value);
-                           exit Outer;
-                        else
-                           null;
-                        end select;
-                     end loop;
-                  end loop Outer;
+                  declare
+                     Msg : Inter_Msg := M.Value;
+                  begin
+
+                  declare
+                     Has_Update : Boolean;
+                     Recompute : Boolean;
+                  begin -- compute graph & update put into a single mutual exclusive region
+                     Local_Linkages.Update (Msg       => M,
+                                            Multicast => Has_Update,
+                                            Compute   => Recompute);
+                     if Has_Update then
+                        Start_Forward.Change_Flag (B => False);
+                     end if;
+                  end;
+
+                     Outer : loop
+                        for W of Workers loop
+                           select
+                              W.Worker_Comm (M.Value);
+                              exit Outer;
+                           else
+                              null;
+                           end select;
+                        end loop;
+                     end loop Outer;
+                  end;
                end;
             end loop Fetching;
          end Fetcher;
@@ -88,7 +142,7 @@ package body Generic_Router is
                   Outer : loop
                      for W of Workers loop
                         select
-                           W.Forward (M.Value);
+                           W.Worker_Forward (M.Value);
                            exit Outer;
                         else
                            null;
@@ -109,27 +163,18 @@ package body Generic_Router is
                   accept Worker_Comm (Msg : in Inter_Msg) do
                      M := Msg;
                   end Worker_Comm;
-                  declare
-                     Has_Update : Boolean;
-                     Recompute : Boolean;
-                  begin
-                     Local_Linkages.Update (Msg       => M,
-                                            Multicast => Has_Update,
-                                            Compute   => Recompute);
-                     if Has_Update then
-                        Start_Forward.Change_Flag (B => False);
-                        for Port of Port_List loop
-                           Port.Link.all.Comm (M);
-                        end loop;
-                     end if;
-                     if Recompute then
-                        Compute_Graph.Start;
-                     end if;
-                  end;
+
+                  for Port of Port_List loop
+                     begin
+                        Port.Link.all.Comm (M);
+                     exception
+                        when Tasking_Error => null;
+                     end;
+                  end loop;
                or
-                  accept Forward (Msg : in Client_Msg) do
+                  accept Worker_Forward (Msg : in Client_Msg) do
                      Client_M := Msg;
-                  end Forward;
+                  end Worker_Forward;
                   if not Start_Forward.Read_Flag then
                      Repository.Enqueue (Client_Msg_Maybe.Valid_Value (E => Client_M));
                   end if;
@@ -143,24 +188,19 @@ package body Generic_Router is
 
          loop
             select
+               accept Responsive;
+            or
                accept Comm (Msg : in Inter_Msg) do
-                  declare
-                     Successful : Boolean := False;
-                  begin
-                     for W of Workers loop
-                        select
-                           W.Worker_Comm (Msg);
-                           Successful := True;
-                           exit;
-                        else
-                           null;
-                        end select;
-                     end loop;
-                     if not Successful then
-                        Inter_Storage.Enqueue (Item => Inter_Msg_Maybe.Valid_Value (E => Msg));
-                     end if;
-                  end;
+                  Inter_Storage.Enqueue (Item => Inter_Msg_Maybe.Valid_Value (E => Msg));
                end Comm;
+            or
+               accept Forward (Msg : in Client_Msg) do
+                  if Msg.Destination = Task_Id then
+                     Storage.Enqueue (Item => Msg);
+                  else
+                     Repository.Enqueue (Item => Client_Msg_Maybe.Valid_Value (E => Msg));
+                  end if;
+               end Forward;
             or
                accept Send_Message (Msg : in Messages_Client) do
                   declare
@@ -173,17 +213,19 @@ package body Generic_Router is
                   end;
                end Send_Message;
             or
-               accept Receive_Message (Message : out Messages_Mailbox) do
-                  declare
-                     Made_Up_Mailbox_Message : constant Messages_Mailbox :=
-                       (Sender      => Task_Id,
-                        The_Message => Message_Strings.To_Bounded_String ("I just see things"),
-                        Hop_Counter => 0);
-                  begin
-                     Message := Made_Up_Mailbox_Message;
-                  end;
-               end Receive_Message;
-
+               when not Storage.Is_Empty =>
+                  accept Receive_Message (Msg : out Messages_Mailbox) do
+                     declare
+                        M : Client_Msg;
+                        Out_M : Messages_Mailbox;
+                     begin
+                        Storage.Dequeue (Item => M);
+                        Out_M.Sender := M.Sender;
+                        Out_M.The_Message := M.The_Message;
+                        Out_M.Hop_Counter := M.Hop_Counter;
+                        Msg := Out_M;
+                     end;
+                  end Receive_Message;
             or
                accept Shutdown;
                Inter_Storage.Enqueue (Item => Inter_Msg_Maybe.Invalid_Value);

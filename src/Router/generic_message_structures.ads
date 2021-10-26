@@ -58,11 +58,14 @@ package Generic_Message_Structures is
    end record;
 
    type Linkage_Array is array (Router_Range) of Linkage;
+   type Par_Array is array (Router_Range) of Router_Range;
 
    protected type Linkages is
       procedure Update (Msg : Inter_Msg; Multicast : out Boolean; Compute : out Boolean);
+      function Read_Link (Idx : Router_Range) return Linkage;
    private
       L : Linkage_Array;
+      Par_Table : Par_Array;
    end Linkages;
 
    protected type Flag is

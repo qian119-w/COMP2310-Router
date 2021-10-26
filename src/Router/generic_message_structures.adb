@@ -18,6 +18,8 @@ package body Generic_Message_Structures is
          Multicast := B;
          Compute := C;
       end Update;
+
+      function Read_Link (Idx : Router_Range) return Linkage is (L (Idx));
    end Linkages;
 
    protected body Flag is

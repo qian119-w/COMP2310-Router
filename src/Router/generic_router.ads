@@ -29,11 +29,13 @@ package Generic_Router is
       entry Configure (Links : Ids_To_Links);
 
       entry Send_Message    (Msg :     Messages_Client);
-      entry Receive_Message (Message : out Messages_Mailbox);
+      entry Receive_Message (Msg : out Messages_Mailbox);
 
       entry Shutdown;
 
+      entry Responsive;
       entry Comm (Msg : Inter_Msg);
+      entry Forward (Msg : Client_Msg);
    end Router_Task;
 
 end Generic_Router;
