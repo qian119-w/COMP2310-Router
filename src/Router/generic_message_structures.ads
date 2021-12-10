@@ -33,9 +33,12 @@ package Generic_Message_Structures is
    package Vector_Pkg is new Ada.Containers.Vectors (Index_Type   => Positive,
                                                      Element_Type => Router_Range);
 
+   type Neighbour is array (1 .. Positive (Router_Range'Last)) of Router_Range;
+
    type Inter_Msg is record
       Sender : Router_Range;
-      Neighbours : Vector_Pkg.Vector;
+      Neighbours : Neighbour;
+      Length : Natural := 0;
    end record;
 
    type Client_Msg is record
