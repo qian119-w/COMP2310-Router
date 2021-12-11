@@ -33,11 +33,10 @@ package body Generic_Router is
          -- Shortest Paths table --
          Par_Table : Par_Array;
          Start_Forward : Flag;
-         task type Worker is
-            entry Worker_Forward (Msg : in Client_Msg);
-         end Worker;
-         Limit : constant Positive := 3;
+         task type Worker;
+         Limit : constant Positive := 5;
          Workers : array (1 .. Limit) of Worker;
+         pragma Unreferenced (Workers);
 
          procedure Send_Self_Message is
          begin
@@ -265,69 +264,38 @@ package body Generic_Router is
             end loop Fetching;
          end Fetcher;
 
-         task Client_Fetcher;
-         task body Client_Fetcher is
-         begin
-            F : loop
-               declare
-                  M : Maybe_Client_Msg;
-               begin
-                  Client_Queue.Dequeue (Item => M);
-                  if not M.Valid then
-                     exit F;
-                  end if;
-                  Start_Forward.Wait;
-                  Outer : loop
-                     for W of Workers loop
-                        select
-                           W.Worker_Forward (M.Value);
-                           exit Outer;
-                        or
-                           delay 0.001;
-                        end select;
-                     end loop;
-                  end loop Outer;
-               end;
-            end loop F;
-         end Client_Fetcher;
-
          task body Worker is
-            Client_M : Client_Msg;
+            M : Maybe_Client_Msg;
          begin
-            loop
-               select
-                  accept Worker_Forward (Msg : in Client_Msg) do
-                     Client_M := Msg;
-                  end Worker_Forward;
-                  if not Start_Forward.Read_Flag then
-                     Client_Queue.Enqueue (Client_Msg_Maybe.Valid_Value (E => Client_M));
-                  else
-                     declare
-                        Idx : Router_Range := Client_M.Destination;
-                     begin
-                        while Par_Table (Idx) /= Task_Id loop
-                           Idx := Par_Table (Idx);
-                        end loop;
-                        for Port of Port_List loop
-                           if Port.Id = Idx then
-                              begin
-                                 Client_M.Hop_Counter := Client_M.Hop_Counter + 1;
-                                 Port.Link.all.Forward (Client_M);
-                              exception
-                                 when Tasking_Error =>
-                                    Client_M.Hop_Counter := Client_M.Hop_Counter - 1;
-                                    Client_Queue.Enqueue (Client_Msg_Maybe.Valid_Value (E => Client_M));
-                                    Send_Self_Message; -- re-check myself's link-state
-                              end;
-                              exit;
-                           end if;
-                        end loop;
-                     end;
-                  end if;
-               or
-                  terminate;
-               end select;
-            end loop;
+            Client_Queue_Loop : loop
+               Start_Forward.Wait;
+               Client_Queue.Dequeue (Item => M);
+               if not M.Valid then
+                  exit Client_Queue_Loop;
+               end if;
+               declare
+                  Client_M : Client_Msg := M.Value;
+                  Idx : Router_Range := Client_M.Destination;
+               begin
+                  while Par_Table (Idx) /= Task_Id loop
+                     Idx := Par_Table (Idx);
+                  end loop;
+                  for Port of Port_List loop
+                     if Port.Id = Idx then
+                        begin
+                           Client_M.Hop_Counter := Client_M.Hop_Counter + 1;
+                           Port.Link.all.Forward (Client_M);
+                        exception
+                           when Tasking_Error =>
+                              Client_M.Hop_Counter := Client_M.Hop_Counter - 1;
+                              Client_Queue.Enqueue (Client_Msg_Maybe.Valid_Value (E => Client_M));
+                              Send_Self_Message;
+                        end;
+                        exit;
+                     end if;
+                  end loop;
+               end;
+            end loop Client_Queue_Loop;
          end Worker;
 
       begin
@@ -374,7 +342,9 @@ package body Generic_Router is
             or
                accept Shutdown;
                Comm_Queue.Enqueue (Item => Inter_Msg_Maybe.Invalid_Value);
-               Client_Queue.Enqueue (Item => Client_Msg_Maybe.Invalid_Value);
+               for I in 1 .. Limit loop
+                  Client_Queue.Enqueue (Item => Client_Msg_Maybe.Invalid_Value);
+               end loop;
                exit;
             end select;
          end loop;
