@@ -5,7 +5,6 @@ package body Generic_Message_Structures is
       begin
          F := B;
       end Change_Flag;
-      function Read_Flag return Boolean is (F);
       entry Wait when F is
       begin
          null;

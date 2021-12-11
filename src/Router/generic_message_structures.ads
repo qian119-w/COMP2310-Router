@@ -64,7 +64,6 @@ package Generic_Message_Structures is
 
    protected type Flag is
       procedure Change_Flag (B : Boolean);
-      function Read_Flag return Boolean;
       entry Wait;
    private
       F : Boolean := False;

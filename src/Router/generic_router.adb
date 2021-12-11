@@ -91,16 +91,14 @@ package body Generic_Router is
          end Change_Affected_Nodes;
 
          -- compute shortest path tree --
-         procedure Compute_Graph (Update : Boolean) is
+         procedure Compute_Graph is
             All_Received : Boolean := True;
          begin
             if Natural (Local_Linkages (Task_Id).Links.Length) = Natural (Router_Range'Last) - 1 then
-               if Update then
-                  Put_Line (Router_Range'Image (Task_Id));
-                  for Idx in Router_Range'Range loop
-                     Par_Table (Idx) := Task_Id;
-                  end loop;
-               end if;
+               Put_Line (Router_Range'Image (Task_Id));
+               for Idx in Router_Range'Range loop
+                  Par_Table (Idx) := Task_Id;
+               end loop;
                Start_Forward.Change_Flag (B => True);
             else
                for Idx in Router_Range'Range loop
@@ -111,36 +109,34 @@ package body Generic_Router is
                   end if;
                end loop;
                if All_Received then
-                  if Update then
-                     Put_Line (Router_Range'Image (Task_Id) & " received");
-                     -- build the shortest path tree; record as a parent table Par_Table --
-                     declare
-                        Searched : array (Router_Range) of Boolean := (others => False);
-                     begin
-                        if not Visited.Contains (Item => Task_Id) then
-                           Visited.Append (New_Item => Task_Id);
-                           Par_Table (Task_Id) := Task_Id;
-                        end if;
-                        loop
-                           exit when Natural (Visited.Length) = Natural (Router_Range'Last);
-                           declare
-                              Current_Last_Idx : constant Positive := Visited.Last_Index;
-                           begin
-                              for Idx in 1 .. Current_Last_Idx loop
-                                 if not Searched (Visited.Element (Index => Idx)) then
-                                    for N of Local_Linkages (Visited.Element (Index => Idx)).Links loop
-                                       if not Visited.Contains (Item => N) then
-                                          Visited.Append (New_Item => N);
-                                          Par_Table (N) := Visited.Element (Index => Idx);
-                                       end if;
-                                    end loop;
-                                    Searched (Visited.Element (Index => Idx)) := True;
-                                 end if;
-                              end loop;
-                           end;
-                        end loop;
-                     end;
-                  end if;
+                  Put_Line (Router_Range'Image (Task_Id) & " received");
+                  -- build the shortest path tree; record as a parent table Par_Table --
+                  declare
+                     Searched : array (Router_Range) of Boolean := (others => False);
+                  begin
+                     if not Visited.Contains (Item => Task_Id) then
+                        Visited.Append (New_Item => Task_Id);
+                        Par_Table (Task_Id) := Task_Id;
+                     end if;
+                     loop
+                        exit when Natural (Visited.Length) = Natural (Router_Range'Last);
+                        declare
+                           Current_Last_Idx : constant Positive := Visited.Last_Index;
+                        begin
+                           for Idx in 1 .. Current_Last_Idx loop
+                              if not Searched (Visited.Element (Index => Idx)) then
+                                 for N of Local_Linkages (Visited.Element (Index => Idx)).Links loop
+                                    if not Visited.Contains (Item => N) then
+                                       Visited.Append (New_Item => N);
+                                       Par_Table (N) := Visited.Element (Index => Idx);
+                                    end if;
+                                 end loop;
+                                 Searched (Visited.Element (Index => Idx)) := True;
+                              end if;
+                           end loop;
+                        end;
+                     end loop;
+                  end;
                   Start_Forward.Change_Flag (B => True);
                end if;
             end if;
@@ -216,8 +212,8 @@ package body Generic_Router is
                            end loop;
                            if Recompute then
                               Start_Forward.Change_Flag (B => False);
+                              Compute_Graph;
                            end if;
-                           Compute_Graph (Update => Recompute);
                         end;
                         -- msg comes from others -> check updates --
                      else
@@ -254,8 +250,8 @@ package body Generic_Router is
                               end if;
                               if Recompute then
                                  Start_Forward.Change_Flag (B => False);
+                                 Compute_Graph;
                               end if;
-                              Compute_Graph (Update => Recompute);
                            end;
                         end if;
                      end if;
