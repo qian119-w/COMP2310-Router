@@ -11,10 +11,13 @@ package body Generic_Router is
 
       Connected_Routers : Ids_To_Links;
       package Protected_Vector_Pkg is new Protected_Vectors (Element => Maybe_Inter_Msg);
+      -- Inter-Router Msgs --
       Comm_Queue : Protected_Vector_Pkg.Protected_V;
       package Protected_Vector_Pkg_2 is new Protected_Vectors (Element => Maybe_Client_Msg);
+      -- Msgs that reached intermediate routers --
       Client_Queue : Protected_Vector_Pkg_2.Protected_V;
       package Protected_Vector_Pkg_3 is new Protected_Vectors (Element => Client_Msg);
+      -- Msgs that reached destination --
       Storage : Protected_Vector_Pkg_3.Protected_V;
 
    begin
@@ -24,20 +27,19 @@ package body Generic_Router is
 
       declare
          Port_List : constant Connected_Router_Ports := To_Router_Ports (Task_Id, Connected_Routers);
-         -- store the neighbour information of all routers
+         -- local copy of link-states --
          Local_Linkages : Linkage_Array;
          Visited : Vector_Pkg.Vector;
-         -- connectivity table --
+         -- Shortest Paths table --
          Par_Table : Par_Array;
          Start_Forward : Flag;
          task type Worker is
-            entry Worker_Comm (Msg : in Inter_Msg);
             entry Worker_Forward (Msg : in Client_Msg);
          end Worker;
          Limit : constant Positive := 3;
          Workers : array (1 .. Limit) of Worker;
 
-         procedure Send_Own_Message is
+         procedure Send_Self_Message is
          begin
             declare
                M : Inter_Msg;
@@ -45,20 +47,18 @@ package body Generic_Router is
                M.Sender := Task_Id;
                Comm_Queue.Enqueue (Item => Inter_Msg_Maybe.Valid_Value (E => M));
             end;
-         end Send_Own_Message;
+         end Send_Self_Message;
 
+         -- send inter-router message to neighbours --
          procedure Send (Msg : Inter_Msg) is
          begin
-            Outer : loop
-               for W of Workers loop
-                  select
-                     W.Worker_Comm (Msg);
-                     exit Outer;
-                  or
-                     delay 0.01;
-                  end select;
-               end loop;
-            end loop Outer;
+            for Port of Port_List loop
+               begin
+                  Port.Link.all.Comm (Msg);
+               exception
+                  when Tasking_Error => null;
+               end;
+            end loop;
          end Send;
 
          -- remove only the affected nodes on the shortest path tree after link-state changes have been detected --
@@ -91,6 +91,7 @@ package body Generic_Router is
             end loop;
          end Change_Affected_Nodes;
 
+         -- compute shortest path tree --
          procedure Compute_Graph (Update : Boolean) is
             All_Received : Boolean := True;
          begin
@@ -160,10 +161,13 @@ package body Generic_Router is
                   declare
                      Msg : constant Inter_Msg := M.Value;
                   begin
-                     -- msg comes from myself -> check own current link-state
+                     -- self message --
+                     -- -> check self current link-state --
                      if Msg.Sender = Task_Id then
                         declare
-                           N : Vector_Pkg.Vector; -- neighbours
+                           -- neighbours --
+                           N : Vector_Pkg.Vector;
+                           -- unresponsive neighbours --
                            Dropped : Vector_Pkg.Vector;
                            Recompute : Boolean := False;
                         begin
@@ -193,7 +197,8 @@ package body Generic_Router is
                            end if;
                            for Idx in Dropped.First_Index .. Dropped.Last_Index loop
                               declare
-                                 N_D : Vector_Pkg.Vector; -- neighbours of a dropped router is nil
+                                 -- dropped routers have no linkages --
+                                 N_D : Vector_Pkg.Vector;
                               begin
                                  if Natural (Local_Linkages (Dropped.Element (Index => Idx)).Links.Length) /= Natural (N_D.Length) then
                                     Recompute := True;
@@ -215,7 +220,7 @@ package body Generic_Router is
                            end if;
                            Compute_Graph (Update => Recompute);
                         end;
-                        -- msg comes from others -> check updates
+                        -- msg comes from others -> check updates --
                      else
                         -- if I am connected to all other routers --
                         -- -> no need to store link-state messages (waste of storage!)
@@ -278,7 +283,7 @@ package body Generic_Router is
                            W.Worker_Forward (M.Value);
                            exit Outer;
                         or
-                           delay 0.01;
+                           delay 0.001;
                         end select;
                      end loop;
                   end loop Outer;
@@ -287,24 +292,10 @@ package body Generic_Router is
          end Client_Fetcher;
 
          task body Worker is
-            M : Inter_Msg;
-
             Client_M : Client_Msg;
          begin
             loop
                select
-                  accept Worker_Comm (Msg : in Inter_Msg) do
-                     M := Msg;
-                  end Worker_Comm;
-
-                  for Port of Port_List loop
-                     begin
-                        Port.Link.all.Comm (M);
-                     exception
-                        when Tasking_Error => null;
-                     end;
-                  end loop;
-               or
                   accept Worker_Forward (Msg : in Client_Msg) do
                      Client_M := Msg;
                   end Worker_Forward;
@@ -326,7 +317,7 @@ package body Generic_Router is
                                  when Tasking_Error =>
                                     Client_M.Hop_Counter := Client_M.Hop_Counter - 1;
                                     Client_Queue.Enqueue (Client_Msg_Maybe.Valid_Value (E => Client_M));
-                                    Send_Own_Message; -- re-check own link-state
+                                    Send_Self_Message; -- re-check myself's link-state
                               end;
                               exit;
                            end if;
@@ -341,7 +332,7 @@ package body Generic_Router is
 
       begin
          -- initial link-state message --
-         Send_Own_Message;
+         Send_Self_Message;
          loop
             select
                accept Responsive;
@@ -373,13 +364,11 @@ package body Generic_Router is
                   accept Receive_Message (Msg : out Messages_Mailbox) do
                      declare
                         M : Client_Msg;
-                        Out_M : Messages_Mailbox;
                      begin
                         Storage.Dequeue (Item => M);
-                        Out_M.Sender := M.Sender;
-                        Out_M.The_Message := M.The_Message;
-                        Out_M.Hop_Counter := M.Hop_Counter;
-                        Msg := Out_M;
+                        Msg.Sender := M.Sender;
+                        Msg.The_Message := M.The_Message;
+                        Msg.Hop_Counter := M.Hop_Counter;
                      end;
                   end Receive_Message;
             or
